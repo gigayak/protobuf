@@ -132,16 +132,30 @@ method addFieldName(this: CompilerContext, n: string) {.base.} =
   this.addName(n, n)
 
 # This attempts to find a name in the local name table, or any parent name table.
-method resolveName(this: CompilerContext, n: string): string {.base.} =
+method resolveName(this: CompilerContext, name: string): string {.base.} =
   var ctx: CompilerContext = this
+  var n: string = name
+
+  var allowRecursion: bool = true
+
+  # Allow for root-relative names to be found.
+  if n[0] == '.':
+    allowRecursion = false
+    ctx = ctx.getRootContext()
+    n = n[1..n.len()-1]
+
   # Allow for qualified names to be found.
   if n.find(".") != -1:
+    allowRecursion = false
     ctx = ctx.getChildContext(n[0..n.rfind(".")-1])
-    return ctx.resolveName(n[n.rfind(".")+1..n.len()-1])
+    n = n[n.rfind(".")+1..n.len()-1]
+
   # Just rip out the mangled name from the table - most of our work is already
   # done during the addName() call.
   if not ctx.nameTable.hasKey(n):
-    if ctx.parentContext == nil:
+    # Shouldn't recurse if we're already at the root context or if we got
+    # a relative path.
+    if ctx.parentContext == nil or not allowRecursion:
       return ""
     else:
       return ctx.parentContext.resolveName(n)
@@ -151,6 +165,8 @@ method resolveName(this: CompilerContext, n: string): string {.base.} =
 # recursion, as otherwise every error will indicate that stuff could not be found
 # in the root context.
 method getName(this: CompilerContext, n: string): string {.base.} =
+  if n == "":
+    raise newException(KeyError, "cannot resolve a blank name (in " & $(this) & " context)")
   result = this.resolveName(n)
   if result == "":
     raise newException(KeyError, "cannot find key '" & n & "' in " & $(this) & " context")
@@ -166,7 +182,7 @@ method getChildContext(this: CompilerContext, namespace: string): CompilerContex
   # don't really make sense (and these exceptions can be ripped out if they ever
   # do make sense), but... don't do that.  Why would it ever make sense?
   if namespace == nil or namespace.len() == 0:
-    raise newException(KeyError, "blank or nil keys are not valid CompilerContext keys")
+    raise newException(KeyError, "blank or nil keys are not valid CompilerContext keys (something tried fetching '" & namespace & "' from " & $(this) & ")")
 
   # ".."s would mean that at some point we wind up attempting to call
   # .getChildContext(""), which would invoke the above KeyError.
