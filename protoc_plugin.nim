@@ -20,11 +20,7 @@ var req: googleprotobufcompilerCodeGeneratorRequest = deserializegoogleprotobufc
 proc maybeRenameReservedId(id: string): string =
   var rename: bool = false
   case id:
-    of "end":
-      rename = true
-    of "type":
-      rename = true
-    of "method":
+    of "end", "type", "method", "block":
       rename = true
     else:
       rename = false
