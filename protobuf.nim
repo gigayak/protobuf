@@ -2,7 +2,6 @@ import system
 
 type
   RootProto* = ref object of RootObj
-    runtimeType*: string
 
 method serialize*(this: RootProto): string =
   return nil
