@@ -3,7 +3,7 @@ import system
 type
   RootProto* = ref object of RootObj
 
-method serialize*(this: RootProto): string =
+method serialize*(this: RootProto): string {.base.} =
   return nil
 
 
