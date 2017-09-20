@@ -186,7 +186,7 @@ proc serializeProtoFixed32Tag*(t: uint32, v: float): string =
   return serializeProtoFixed32Tag(t, float32(v))
 
 proc deserializeProtoFixed32*(a: string, index: var int): uint32 =
-  if index + 4 >= a.len:
+  if index + 4 > a.len:
     stderr.writeLine "not enough bytes available to read, fixed32 deserialization failed"
     var e: ref IOError
     new(e)
@@ -229,7 +229,7 @@ proc serializeProtoFixed64Tag*(t: uint32, v: float64): string =
   return serializeProtoFixed64Tag(t, cast[uint64](v))
 
 proc deserializeProtoFixed64*(a: string, index: var int): uint64 =
-  if index + 8 >= a.len:
+  if index + 8 > a.len:
     stderr.writeLine "not enough bytes available to read, fixed64 deserialization failed"
     var e: ref IOError
     new(e)
