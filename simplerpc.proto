@@ -1,0 +1,29 @@
+syntax = "proto3";
+
+message SimpleRPCRequest {
+  string service_name = 1;
+  string request_type = 2;
+  bytes request_contents = 3;
+}
+
+message SimpleRPCResponse {
+  // (service_name, response_type) tuple uniquely identifies
+  // a service.  You need service_name in the identifier in
+  // case multiple services all accept the same request type
+  // and return the same response type.
+  string service_name = 1;
+  string response_type = 2;
+
+  // This will contain the serialized protobuf bytes corresponding
+  // to the protobuf named by response_type.  To send the response
+  // for a protoc code generator, for example, this would be
+  // "google.protobuf.compiler.CodeGeneratorResponse".
+  bytes response_contents = 3;
+
+  // This will be set if there was a problem processing
+  // the request.  "" or nil are to be considered non-errors.
+  //
+  // Clients SHOULD NOT process responseContents when this is
+  // set.
+  string error = 4;
+}

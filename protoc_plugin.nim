@@ -16,7 +16,6 @@ import google/protobuf/descriptor_pb
 var input: string = readAll(stdin)
 var req: googleprotobufcompilerCodeGeneratorRequest = deserializegoogleprotobufcompilerCodeGeneratorRequest(input)
 
-
 proc maybeRenameReservedId(id: string): string =
   var rename: bool = false
   case id:
@@ -127,6 +126,9 @@ method addEnumName(this: CompilerContext, n: string) {.base.} =
 method addFieldName(this: CompilerContext, n: string) {.base.} =
   this.addName(n, n)
 
+method addServiceName(this: CompilerContext, n: string) {.base.} =
+  this.addName(n, n)
+
 # This attempts to find a name in the local name table, or any parent name table.
 method resolveName(this: CompilerContext, name: string): string {.base.} =
   var ctx: CompilerContext = this
@@ -165,7 +167,7 @@ method getName(this: CompilerContext, n: string): string {.base.} =
     raise newException(KeyError, "cannot resolve a blank name (in " & $(this) & " context)")
   result = this.resolveName(n)
   if result == "":
-    raise newException(KeyError, "cannot find key '" & n & "' in " & $(this) & " context")
+    raise newException(KeyError, "cannot find key '" & n & "' in " & $(this) & " context, make sure a correct call to addMessageName(), addEnumName(), addFieldName(), addServiceName(), etc has been made prior to looking up the key in the CompilerContext name cache with .getName()")
 
 method getChildContext(this: CompilerContext, namespace: string): CompilerContext =
   # Calling .getChildContext("") is meaningless, as you'd be descending through
@@ -307,7 +309,9 @@ proc visitForFwdDecls(parentCtx: CompilerContext, m: googleprotobufDescriptorPro
   # resides in the same context as the message's sub-context is stored in.
   var msgName: string = parentCtx.getName(m.name)
   result &= "proc new" & msgName & "*(): " & msgName & "\n"
+  result &= "proc newProto*(pb: var " & msgName & ")\n"
   result &= "proc deserialize" & msgName & "*(a: string): " & msgName & "\n"
+  result &= "proc deserializeProto*(pb: var " & msgName & ", a: string)\n"
 
 proc visitForTypeDecls(ctx: CompilerContext, e: googleprotobufEnumDescriptorProto): string =
   result = ""
@@ -357,6 +361,14 @@ proc visitForCode(parentCtx: CompilerContext, m: googleprotobufDescriptorProto):
     elif fieldDefault != "": # allow blank defaults to skip scalar initialization
       result &= "  result." & fieldName & " = " & fieldDefault & "\n"
   result &= "\n"
+  # By-ref initializer, which allows use of overloaded function dispatch.
+  #
+  # This should make some RPC interfaces easier to generate, as it makes
+  # templated types easier to use.  Instead of worrying about creating a
+  # method name from the passed-in type, you just initialize the variable
+  # using it, and then use a slightly different syntax to fill it up.
+  result &= "proc newProto*(pb: var " & msgName & ") =\n"
+  result &= "  pb = new" & msgName & "()\n"
 
   # Serializer.
   result &= "method serialize*(this: " & msgName & "): string =\n"
@@ -394,6 +406,7 @@ proc visitForCode(parentCtx: CompilerContext, m: googleprotobufDescriptorProto):
   result &= "  result = new" & msgName & "()\n"
   result &= "  var index: int = 0\n"
   result &= "  while index < a.len():\n"
+  result &= "    var currentTagIndex: int = index\n"
   result &= "    var tag: uint32 = uint32(deserializeProtoVarint(a, index) and uint32(0xFFFFFFFF))\n"
   result &= "    var typeId: uint8 = tag and uint8(0x7)\n"
   result &= "    var id: uint32 = (tag and not uint32(0x7)) shr 3\n"
@@ -447,7 +460,11 @@ proc visitForCode(parentCtx: CompilerContext, m: googleprotobufDescriptorProto):
 
     # Of course, we should throw a fit if we can't find a valid type for this proto.
     result &= "      else:\n"
-    result &= "        raise newException(IOError, \"incorrect type ID \" & $(typeId) & \" while deserializing " & msgName & " field " & fieldName & "\")\n"
+    result &= "        raise newException(IOError, \"incorrect type ID \" & $(typeId) & \" while deserializing " & msgName & " field " & fieldName & " at index \" & $(currentTagIndex))\n"
+  # By-reference deserializer for overloaded dispatch use, which can make
+  # RPC interfaces easier.
+  result &= "proc deserializeProto*(pb: var " & msgName & ", a: string) =\n"
+  result &= "  pb = deserialize" & msgName & "(a)\n"
 
   # However, no error should be thrown for unknown fields (though
   # we really should be storing them for later to be able to add them
@@ -456,6 +473,27 @@ proc visitForCode(parentCtx: CompilerContext, m: googleprotobufDescriptorProto):
   #
   # TODO: handle unknown fields correctly - currently they're just
   # removed, in violation of the protobuf spec.
+  result &= "\n"
+
+proc visitForCode(parentCtx: CompilerContext, s: googleprotobufServiceDescriptorProto): string =
+  result = ""
+  parentCtx.addServiceName(s.name)
+  var name: string = parentCtx.getName(s.name)
+  result &= "const " & name & "Descriptor*: RPCServiceDescriptor = RPCServiceDescriptor(\n"
+  result &= "  name: \"" & name & "\",\n"
+  result &= "  methods: @[\n"
+
+  # Yep, the following property can't be named .method since method is a
+  # keyword in Nim, and would cause the lexer to throw a fit.  You can't
+  # escape this mangling, even in the compiler that causes it!
+  for methodDesc in s.m_method:
+    result &= "    RPCMethodDescriptor(\n"
+    result &= "      name: \"" & methodDesc.name & "\",\n"
+    result &= "      requestTypeName: \"" & parentCtx.getName(methodDesc.inputType) & "\",\n"
+    result &= "      responseTypeName: \"" & parentCtx.getName(methodDesc.outputType) & "\",\n"
+    result &= "    ),\n"
+  result &= "  ],\n"
+  result &= ")\n"
   result &= "\n"
 
 proc visitForCode(ctx: CompilerContext, f: googleprotobufFileDescriptorProto): string =
@@ -487,6 +525,10 @@ proc visitForCode(ctx: CompilerContext, f: googleprotobufFileDescriptorProto): s
   # Serializers and deserializers.
   for msgType in f.messageType:
     result &= visitForCode(ctx, msgType)
+
+  # Service descriptors for RPC implementations.
+  for service in f.service:
+    result &= visitForCode(ctx, service)
 
 proc visitForCode(ctx: CompilerContext, req: googleprotobufcompilerCodeGeneratorRequest): googleprotobufcompilerCodeGeneratorResponse =
   result = newgoogleprotobufcompilerCodeGeneratorResponse()

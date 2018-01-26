@@ -3,7 +3,7 @@ import system
 type
   RootProto* = ref object of RootObj
 
-method serialize*(this: RootProto): string {.base.} =
+method serialize*(this: RootProto): string {.base, gcsafe.} =
   return nil
 
 
@@ -280,3 +280,23 @@ proc deserializeProtoString*(a: string, index: var int): string =
     raise e
   result = a[index..index+length-1]
   index += length
+
+# These allow an RPC implementation to look up details of which RPC methods
+# to provide at compile time.
+#
+# protoc_plugin should then write code in each generated file coming from
+# a .proto file with a service definition which contains compile-time objects
+# of these classes.
+#
+# RPC implementations can then use those objects in a macro to generate code
+# for their client or server code generation needs.
+type
+  # "object of RootObj" would cause "invalid type for const" here
+  RPCMethodDescriptor* = object
+    name*: string
+    requestTypeName*: string
+    responseTypeName*: string
+
+  RPCServiceDescriptor* = object
+    name*: string
+    methods*: seq[RPCMethodDescriptor]
